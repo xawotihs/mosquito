@@ -86,7 +86,7 @@ class Base(ABC):
         Returns current balance
         """
         # Remove all items with zero amount
-        self.balance = {k: v for k, v in self.balance.items() if v != 0}
+        # self.balance = {k: v for k, v in self.balance.items() if v != 0}
         return self.balance
 
     def sell_all_assets(self, trades, wallet, pair_to_hold):
