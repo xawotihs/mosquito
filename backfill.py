@@ -41,7 +41,8 @@ def main(args):
     if args.all:
         pairs = all_pairs
     elif args.pairs is not None:
-        tmp_pairs = [args.pairs]
+        tmp_pairs = args.pairs.split(",")
+        tmp_pairs = [pair.strip(" ") for pair in tmp_pairs]
         pairs = []
         # Handle * suffix pairs
         for pair in tmp_pairs:
