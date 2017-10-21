@@ -113,7 +113,7 @@ class Report:
         # TODO return only wallet of given currencies
         wallet_string = ''
         for symbol, balance in wallet.items():
-            if balance > 0:
+            if balance != 0:
                 wallet_string += '| ' + str(balance) + symbol
         wallet_string += ' |'
         return wallet_string
