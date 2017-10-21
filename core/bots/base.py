@@ -133,7 +133,6 @@ class Base(ABC):
         for action in actions:
             # If action is None, just skip it
             if action.action == TradeState.none:
-                actions.remove(action)
                 continue
 
             # If we are forcing_sell, we will first sell all our assets
@@ -166,29 +165,26 @@ class Base(ABC):
             if action.action == TradeState.buy:
                 if currency_balance <= 0:
                     print('Want to buy ' + action.pair + ', not enough money, or everything already bought..')
-                    actions.remove(action)
                     continue
                 print(colored('Bought: ' + str(action.amount) + ', pair: ' + action.pair + ', price: ' + str(close_price), 'green'))
                 wallet[asset_symbol] = asset_balance + action.amount - fee
                 wallet[currency_symbol] = currency_balance - (action.amount*action.rate)
                 # Append trade
                 trades.loc[len(trades)] = [ticker['date'].iloc[0], action.pair, close_price, 'buy']
-                actions.remove(action)
                 continue
 
             # *** Sell ***
             elif action.action == TradeState.sell:
                 if asset_balance <= 0:
                     print('Want to sell ' + action.pair + ', not enough assets, or everything already sold..')
-                    actions.remove(action)
                     continue
                 print(colored('Sold: ' + str(action.amount) + '' + action.pair + ', price: ' + str(close_price), 'yellow'))
                 wallet[currency_symbol] = currency_balance + ((action.amount-fee)*action.rate)
                 wallet[asset_symbol] = asset_balance - action.amount
                 # Append trade
                 trades.loc[len(trades)] = [ticker['date'].iloc[0], action.pair, close_price, 'sell']
-                actions.remove(action)
                 continue
+        actions.clear()
         self.balance = wallet
         return actions
 
