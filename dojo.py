@@ -1,15 +1,16 @@
 import time
 import configargparse
-from ai.blueprint import Blueprint
+from dojo.dojo import Dojo
 
 
 def run():
     """
      Start blueprint
     """
-    blueprint = Blueprint()
+    dojo = Dojo()
     start_time = time.time()
-    blueprint.run()
+    args = arg_parser.parse_known_args()[0]
+    dojo.train(blueprint=args.blueprint)
     end_time = time.time()
     time_delta = end_time - start_time
     print('Finished in ' + str(int(time_delta)) + ' sec.')
@@ -17,6 +18,6 @@ def run():
 
 if __name__ == '__main__':
     arg_parser = configargparse.get_argument_parser()
-    arg_parser.add('--pairs', help='Pairs to backfill. For ex. [BTC_ETH, BTC_* (to get all BTC_* prefixed pairs]')
-    arg_parser.add('-c', '--config', is_config_file=True, help='config file path', default='mosquito.ini')
+    arg_parser.add('-v', '--verbose', help='Verbosity', action='store_true')
+    arg_parser.add('-b', '--blueprint', help='blueprint csv.file')
     run()

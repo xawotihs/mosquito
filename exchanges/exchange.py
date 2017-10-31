@@ -1,10 +1,11 @@
 import configargparse
 from .poloniex.polo import Polo
 from .bittrex.bittrexclient import BittrexClient
-from pymongo import MongoClient
+import pymongo
 from core.bots.enums import TradeMode
 import pandas as pd
 from termcolor import colored
+import time
 
 
 class Exchange:
@@ -60,7 +61,7 @@ class Exchange:
         db = self.args.db
         port = int(self.args.db_port)
         url = self.args.db_url
-        client = MongoClient(url, port)
+        client = pymongo.MongoClient(url, port)
         db = client[db]
         return db
 
@@ -114,20 +115,51 @@ class Exchange:
         """
         return self.exchange.return_open_orders(currency_pair)
 
+    # Do not use!!!: It turns out that group method is very consuming (takes approx 3x then get_offline_ticker)
+    def get_offline_tickers(self, epoch, pairs):
+        """
+        Returns offline data from DB
+        """
+        pipeline = [
+            {"$match": {"date": {"$lte": epoch}, "pair": {"$in": pairs}}},
+            {"$group": {"_id": "$pair",
+                        "pair": {"$last": "$pair"},
+                        "high": {"$last": "$high"},
+                        "low": {"$last": "$low"},
+                        "open": {"$last": "$open"},
+                        "close": {"$last": "$close"},
+                        "volume": {"$last": "$volume"},
+                        "quoteVolume": {"$last": "$quoteVolume"},
+                        "weightedAverage": {"$last": "$weightedAverage"},
+                        "date": {"$last": "$date"}
+                        }
+             }
+        ]
+
+        db_list = list(self.ticker.aggregate(pipeline, allowDiskUse=True))
+        ticker_df = pd.DataFrame(db_list)
+        df_pair = ticker_df['pair'].str.split('_', 1, expand=True)
+        ticker_df = pd.concat([ticker_df, df_pair], axis=1)
+        ticker_df = ticker_df.drop(['_id'], axis=1)
+        return ticker_df
+
     def get_offline_ticker(self, epoch, pairs):
         """
         Returns offline data from DB
         """
         ticker = pd.DataFrame()
-        # print('getting offline ticker for total pairs: ' + str(len(pairs)) + ', epoch:', str(epoch))
+        # print(' Getting offline ticker for total pairs: ' + str(len(pairs)) + ', epoch:', str(epoch))
         for pair in pairs:
-            db_doc = self.ticker.find_one({"$and": [{"date": {"$gte": epoch}},
+            db_doc = self.ticker.find_one({"$and": [{"date": {"$lte": epoch}},
                                           {"pair": pair},
-                                          {"exchange": self.exchange_name}]})
+                                          {"exchange": self.exchange_name}]},
+                                          sort=[("date", pymongo.DESCENDING)])
 
             if db_doc is None:
                 if self.verbosity:
-                    print(colored('No offline data for pair: ' + pair + ', epoch: ' + str(epoch), 'yellow'))
+                    local_dt = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(epoch))
+                    print(colored('No offline data for pair: ' + pair + ', epoch: ' + str(epoch) + ' (local: '
+                                  + str(local_dt) + ')', 'yellow'))
                 continue
 
             dict_keys = list(db_doc.keys())
@@ -136,5 +168,4 @@ class Exchange:
             df = pd.concat([df, df_pair], axis=1)
             df.rename(columns={0: 'curr_1', 1: 'curr_2'}, inplace=True)
             ticker = ticker.append(df, ignore_index=True)
-
         return ticker

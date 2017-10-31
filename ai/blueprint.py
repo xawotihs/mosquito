@@ -7,7 +7,8 @@ from exchanges.exchange import Exchange
 
 class Blueprint:
     """
-    Main module for generating and handling datasets for AI
+    Main module for generating and handling datasets for AI. Application will generate datasets including
+    future target/output parameters.
     """
     arg_parser = configargparse.get_argument_parser()
     arg_parser.add('--days', help='Days to start blueprint from', default=30)
@@ -23,8 +24,10 @@ class Blueprint:
 
     def __init__(self):
         args = self.arg_parser.parse_known_args()[0]
+        self.blueprint_days = args.days
         self.ticker_size = int(args.ticker_size)
-        self.start_time = int(time.time()) - int(args.days)*86400
+        self.blueprint_end_time = int(time.time())
+        self.start_time = self.blueprint_end_time - int(self.blueprint_days)*86400
         self.ticker_epoch = self.start_time
         self.exchange = Exchange(None)
         self.pairs = common.parse_pairs(self.exchange, args.pairs)
@@ -42,7 +45,7 @@ class Blueprint:
         """
         if counter % 100 == 0:
             print('.', end='', flush=True)
-        if counter > 10000:
+        if counter > 101:
             counter = 0
             self.write_to_file()
         return counter+1
@@ -51,6 +54,10 @@ class Blueprint:
         """
         Writes df to file
         """
+        if self.df_blueprint.empty:
+            print('Blueprint is empty, nothing to write to file.')
+            return
+
         export_df = self.df_blueprint.copy()
         export_df = export_df.drop(['_id', 'id', 'curr_1', 'curr_2', 'exchange'], axis=1)
         dt = export_df.tail(1).date.iloc[0]
@@ -68,11 +75,15 @@ class Blueprint:
         """
         Calculates and stores dataset
         """
+        print('Starting generating data for Blueprint', self.blueprint.name, ':back-days', self.blueprint_days,
+              '(This might take several hours/days,.so please stay back and relax)')
         dot_counter = 0
         while True:
             # Get new dataset
             df = self.exchange.get_offline_ticker(self.ticker_epoch, self.pairs)
-            if df.empty:
+
+            # Check if the simulation is finished
+            if self.ticker_epoch >= self.blueprint_end_time:
                 self.write_to_file()
                 return
 
