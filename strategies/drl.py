@@ -26,13 +26,7 @@ class Drl(Base):
         self.name = 'drl'
         self.min_history_ticks = 50
         self.buy_sell_mode = BuySellMode.user_defined
-        self.DRL = PolicyGradient(
-            n_actions=6,
-            n_features=3,#6*self.min_history_ticks,
-            learning_rate=0.02,
-            reward_decay=0.99,
-            output_graph=True,
-        )
+        self.DRL = None
 
     def compute_relevant_pairs(self, wallet, main_currency):
         currencies = list(wallet.current_balance.keys())
@@ -91,18 +85,26 @@ class Drl(Base):
         pairs_names = look_back.pair.unique()
         look_back.reset_index()
 
+        if not self.DRL:
+            self.DRL = PolicyGradient(
+                n_actions=pairs_count+1,
+                n_features=3,#6*self.min_history_ticks
+                output_graph=True,
+            )
+
+
         if self.last_computed_weights!=[]:
             self.step +=1
             future_prices = self.compute_future_prices(look_back)
             self.DRL.store_transition(
                 self.last_prices,
-                np.array(self.last_20_measured_weights).reshape((6,1,20)),
+                np.array(self.last_20_measured_weights).reshape((pairs_count+1,1,20)),
                 future_prices)
 
         if(len(self.last_20_measured_weights)>=20):
             self.last_20_measured_weights.pop()
 
-        self.last_20_measured_weights.insert(0, current_weights.reshape((6,1)))
+        self.last_20_measured_weights.insert(0, current_weights.reshape((pairs_count+1,1)))
 
         # Wait until we have enough data
         if dataset_cnt < self.min_history_ticks:
@@ -134,7 +136,7 @@ class Drl(Base):
 
         features = np.array([close.as_matrix(), high.as_matrix(), low.as_matrix()])
         features = features[np.newaxis, :]
-        assert(features.shape == (1,3,6,50))
+        assert(features.shape == (1,3,pairs_count+1,50))
 
 #        converted_look_back = converted_look_back.filter(items = self.compute_relevant_pairs(wallet, 'BTC'))
 #        converted_look_back = converted_look_back.tail(self.min_history_ticks)

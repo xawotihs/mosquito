@@ -13,8 +13,7 @@ class PolicyGradient:
             self,
             n_actions,
             n_features,
-            learning_rate=0.009,
-            reward_decay=0.95,
+            learning_rate=0.00003,
             output_graph=False,
     ):
         self.n_actions = n_actions
@@ -62,6 +61,8 @@ class PolicyGradient:
             kernel_size=[1, 3],
             activation=tf.nn.relu,
             kernel_initializer=tf.contrib.layers.xavier_initializer(),
+            bias_initializer=tf.contrib.layers.xavier_initializer(),
+            kernel_regularizer=tf.contrib.layers.l2_regularizer(scale=0.00000001),
             name='conv1',
         )
         self.conv2 = tf.layers.conv2d(
@@ -70,6 +71,8 @@ class PolicyGradient:
             kernel_size=[1, 48],
             activation=tf.nn.relu,
             kernel_initializer = tf.contrib.layers.xavier_initializer(),
+            bias_initializer=tf.contrib.layers.xavier_initializer(),
+            kernel_regularizer=tf.contrib.layers.l2_regularizer(scale=0.00000001),
             name='conv2',
         )
         concat = tf.concat([self.conv2, self.tf_weights],3)
@@ -79,6 +82,8 @@ class PolicyGradient:
             kernel_size=[1, 1],
             activation=tf.nn.relu,
             kernel_initializer = tf.contrib.layers.xavier_initializer(),
+            bias_initializer=tf.contrib.layers.xavier_initializer(),
+            kernel_regularizer=tf.contrib.layers.l2_regularizer(scale=0.00000001),
             name='conv3'
         )
 
@@ -99,11 +104,11 @@ class PolicyGradient:
             self.loss = tf.losses.compute_weighted_loss(mu*self.all_act_prob, -self.tf_vt)
 
         with tf.name_scope('train'):
-            self.train_op = tf.train.GradientDescentOptimizer(self.lr).minimize(self.loss)
+            self.train_op = tf.train.AdamOptimizer(self.lr).minimize(self.loss)
 
     def choose_weights(self, prices, historic_weights):
         #normalize the input
-        weights = np.array(historic_weights).reshape(1,6,1,20)
+        weights = np.array(historic_weights).reshape(1,self.n_actions,1,20)
         prob_weights, conv2, conv1, transposed_prices = self.sess.run((self.all_act_prob, self.conv2, self.conv1, self.prices),
                                               feed_dict={self.tf_obs: prices, self.tf_weights: weights})
                                                                        #observation.values.flatten().tolist()})
@@ -118,8 +123,8 @@ class PolicyGradient:
     def learn(self):
         if len(self.ep_prices) != 50: return
 
-        future_prices = np.array(self.ep_fp).reshape((50,6,1,1))
-        weights = np.array(self.ep_last_weights).reshape(50,6,1,20)
+        future_prices = np.array(self.ep_fp).reshape((50,self.n_actions,1,1))
+        weights = np.array(self.ep_last_weights).reshape(50,self.n_actions,1,20)
         old_and_current_prices = np.vstack(self.ep_prices)
 
 # train on episode
