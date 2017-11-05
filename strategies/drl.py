@@ -14,11 +14,12 @@ class Drl(Base):
     """
     About: Multi-currency strategy focusing on using deep reinforcement learning algorithms
     """
-    last_weights = []
+    last_computed_weights = []
     last_prices = None
-    initial_portfolio_value = None
+    last_20_measured_weights = []
     rewards = []
     step = 0
+
 
     def __init__(self):
         super(Drl, self).__init__()
@@ -27,7 +28,7 @@ class Drl(Base):
         self.buy_sell_mode = BuySellMode.user_defined
         self.DRL = PolicyGradient(
             n_actions=6,
-            n_features=6*self.min_history_ticks,
+            n_features=3,#6*self.min_history_ticks,
             learning_rate=0.02,
             reward_decay=0.99,
             output_graph=True,
@@ -64,89 +65,86 @@ class Drl(Base):
 
         return (weights, sum)
 
-    '''
-    def build_net(self, features):
-        input_layer = tf.reshape(features["x"], [-1, 3, 11, 50])
-        weights_stack = tf.placeholder(tf.float32, shape=(8, 11, 1 ))
-        conv1_layer = tf.layers.conv2d(
-            inputs=input_layer,
-            filters=2,
-            kernel_size=[1, 3],
-            padding="same",
-            activation=tf.nn.relu)
-        conv2_layer = tf.layers.conv2d(
-            inputs=conv1_layer,
-            filters=1,
-            kernel_size=[1, 48],
-            padding="same",
-            activation=tf.nn.relu)
-        conv3_layer = tf.layers.conv2d(
-            inputs=[conv2_layer],
-            filters=1,
-            kernel_size=[1, 1],
-            padding="same",
-            activation=tf.nn.relu)
-        dense_layer = tf.layers.dense(
-            inputs=conv2_layer,
-            units=10,
-            activation=tf.nn.tanh,  # tanh activation
-            kernel_initializer=tf.random_normal_initializer(mean=0, stddev=0.3),
-            bias_initializer=tf.constant_initializer(0.1),
-            name='fc1')
-    '''
-    def compute_rewards(self, portfolio_value):
-        return
+    def compute_future_prices(self, look_back):
+        '''
+        We're computing normalized future prices compared to previous prices
+        :param look_back:
+        :return: a vector of normalized future prices
+        '''
+        close = look_back.pivot_table(index='pair', columns='date', values='close')
+        close.loc['BTC_BTC'] = 1
+ #       last_column = close.iloc[:,-1]
+ #       close = close.div(last_column, axis='index')
+
+        return close.iloc[:,-1]/close.iloc[:,-2]
 
     def calculate(self, look_back, wallet):
         """
         Main Strategy function, which takes recent history data and returns recommended list of actions
         """
 
+        (current_weights, wallet_value) = self.compute_weights_and_value(look_back, wallet)
+        print("Current weights:", current_weights)
+
         (dataset_cnt, pairs_count) = common.get_dataset_count(look_back, self.group_by_field)
+        look_back = look_back.tail(pairs_count * self.min_history_ticks)
+        pairs_names = look_back.pair.unique()
+        look_back.reset_index()
+
+        if self.last_computed_weights!=[]:
+            self.step +=1
+            future_prices = self.compute_future_prices(look_back)
+            self.DRL.store_transition(
+                self.last_prices,
+                np.array(self.last_20_measured_weights).reshape((6,1,20)),
+                future_prices)
+
+        if(len(self.last_20_measured_weights)>=20):
+            self.last_20_measured_weights.pop()
+
+        self.last_20_measured_weights.insert(0, current_weights.reshape((6,1)))
 
         # Wait until we have enough data
         if dataset_cnt < self.min_history_ticks:
             print('dataset_cnt:', dataset_cnt)
             return self.actions
 
+
         self.actions.clear()
 
-        look_back = look_back.tail(pairs_count * self.min_history_ticks)
-        pairs_names = look_back.pair.unique()
-
-        (current_weights, wallet_value) = self.compute_weights_and_value(look_back, wallet)
         current_amounts = list(wallet.current_balance.values())
 
-        if not self.initial_portfolio_value:
-            self.initial_portfolio_value = wallet_value
-            self.step = 0
-
-        if self.last_weights!=[]:
-            self.step +=1
-            reward = np.log(wallet_value/self.initial_portfolio_value)/self.step
-            self.DRL.store_transition(self.last_prices,self.last_weights,reward)
-
-        if self.step ==100:
-            discounted_ep_rs_norm = self.DRL.learn()
-            print("discounted_ep_rs_norm is: ", discounted_ep_rs_norm)
-            self.initial_portfolio_value = None
+        self.DRL.learn()
 
         currencies = list(wallet.current_balance.keys())
-        look_back.reset_index()
 #        converted_look_back = look_back.pivot(index=['date', 'pair'], columns='pair', values='close')
-        converted_look_back = look_back.pivot_table(index='date', columns='pair', values='close')
+#        converted_look_back = look_back.pivot_table(index='date', columns='pair', values='close')
+        close = look_back.pivot_table(index='pair', columns='date', values='close')
+        close.loc['BTC_BTC'] = 1
+        last_column = close.iloc[:,-1]
+        close = close.div(last_column, axis='index')
 
-        converted_look_back['BTC_BTC'] = 1
-        converted_look_back = converted_look_back.filter(items = self.compute_relevant_pairs(wallet, 'BTC'))
-        converted_look_back = converted_look_back.tail(self.min_history_ticks)
+        high = look_back.pivot_table(index='pair', columns='date', values='high')
+        high.loc['BTC_BTC'] = 1
+        high = high.div(last_column, axis='index')
 
-        next_weights = self.DRL.choose_weights(converted_look_back)
+        low = look_back.pivot_table(index='pair', columns='date', values='low')
+        low.loc['BTC_BTC'] = 1
+        low = low.div(last_column, axis='index')
 
-        self.last_weights = next_weights
-        self.last_prices = converted_look_back
-#        next_weights = self.algo.next_weights(converted_look_back, current_weights)
+        features = np.array([close.as_matrix(), high.as_matrix(), low.as_matrix()])
+        features = features[np.newaxis, :]
+        assert(features.shape == (1,3,6,50))
 
+#        converted_look_back = converted_look_back.filter(items = self.compute_relevant_pairs(wallet, 'BTC'))
+#        converted_look_back = converted_look_back.tail(self.min_history_ticks)
 
+#        next_weights = self.DRL.choose_weights(converted_look_back)
+        next_weights = self.DRL.choose_weights(features, self.last_20_measured_weights)
+        print("New weights:", next_weights)
+
+        self.last_computed_weights = next_weights[np.newaxis, :]
+        self.last_prices = features
 
         # We sell first, then we buy
         # if new_weight < current_weight, we need to sell the related currency
