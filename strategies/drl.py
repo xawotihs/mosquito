@@ -87,7 +87,7 @@ class Drl(Base):
 
         if not self.DRL:
             self.DRL = PolicyGradient(
-                n_actions=pairs_count+1,
+                n_actions=pairs_count,
                 n_features=3,#6*self.min_history_ticks
                 output_graph=True,
             )
@@ -98,13 +98,13 @@ class Drl(Base):
             future_prices = self.compute_future_prices(look_back)
             self.DRL.store_transition(
                 self.last_prices,
-                np.array(self.last_20_measured_weights).reshape((pairs_count+1,1,20)),
+                np.array(self.last_20_measured_weights).reshape((pairs_count,1,20)),
                 future_prices)
 
         if(len(self.last_20_measured_weights)>=20):
             self.last_20_measured_weights.pop()
 
-        self.last_20_measured_weights.insert(0, current_weights.reshape((pairs_count+1,1)))
+        self.last_20_measured_weights.insert(0, current_weights[1:].reshape((pairs_count,1)))
 
         # Wait until we have enough data
         if dataset_cnt < self.min_history_ticks:
@@ -122,21 +122,18 @@ class Drl(Base):
 #        converted_look_back = look_back.pivot(index=['date', 'pair'], columns='pair', values='close')
 #        converted_look_back = look_back.pivot_table(index='date', columns='pair', values='close')
         close = look_back.pivot_table(index='pair', columns='date', values='close')
-        close.loc['BTC_BTC'] = 1
         last_column = close.iloc[:,-1]
         close = close.div(last_column, axis='index')
 
         high = look_back.pivot_table(index='pair', columns='date', values='high')
-        high.loc['BTC_BTC'] = 1
         high = high.div(last_column, axis='index')
 
         low = look_back.pivot_table(index='pair', columns='date', values='low')
-        low.loc['BTC_BTC'] = 1
         low = low.div(last_column, axis='index')
 
         features = np.array([close.as_matrix(), high.as_matrix(), low.as_matrix()])
         features = features[np.newaxis, :]
-        assert(features.shape == (1,3,pairs_count+1,50))
+        assert(features.shape == (1,3,pairs_count,50))
 
 #        converted_look_back = converted_look_back.filter(items = self.compute_relevant_pairs(wallet, 'BTC'))
 #        converted_look_back = converted_look_back.tail(self.min_history_ticks)

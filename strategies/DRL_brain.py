@@ -52,7 +52,7 @@ class PolicyGradient:
             #x = tf.reshape(self.tf_obs, [-1, self.n_features, self.n_actions, 50])  # input
             self.prices = tf.transpose(self.tf_obs, [0, 2, 3, 1])
 
-            self.tf_vt = tf.placeholder(tf.float32, [None, self.n_actions, 1, 1], name="future_prices")
+            self.tf_vt = tf.placeholder(tf.float32, [None, self.n_actions+1, 1, 1], name="future_prices")
             self.tf_weights = tf.placeholder(tf.float32, [None, self.n_actions, 1, 20], name="historic_weights")
 
         self.conv1 = tf.layers.conv2d(
@@ -76,7 +76,7 @@ class PolicyGradient:
             name='conv2',
         )
         concat = tf.concat([self.conv2, self.tf_weights],3)
-        self.all_act = tf.layers.conv2d(
+        self.conv3 = tf.layers.conv2d(
             inputs=concat,
             filters=1,
             kernel_size=[1, 1],
@@ -87,7 +87,11 @@ class PolicyGradient:
             name='conv3'
         )
 
-        self.all_act_prob = tf.nn.softmax(self.all_act, dim=1, name='computed_weights')  # use softmax to convert to probability
+        cash_bias = tf.get_variable("cash_bias", [1])
+        padded = tf.pad(self.conv3, tf.constant([[0,0], [1,0], [0,0], [0,0]]), "CONSTANT")
+        #self.all_act = tf.concat([self.conv3, cash_bias],1)
+
+        self.all_act_prob = tf.nn.softmax(padded+cash_bias, dim=1, name='computed_weights')  # use softmax to convert to probability
 
         with tf.name_scope('loss'):
             # to maximize total reward (log_p * R) is to minimize -(log_p * R), and the tf only have minimize(loss)
@@ -98,8 +102,8 @@ class PolicyGradient:
             #self.last_weights = tf.gather_nd(self.tf_vt, [[[19]]])
 #            last_weights = tf.gather_nd(last_weights, [49])
 
-            self.w_t_1 = tf.gather_nd(self.tf_weights, [[[19]]])
-            self.weights_diff = tf.subtract(self.w_t_1, self.all_act_prob, name='subbssss')
+            #self.w_t_1 = tf.gather_nd(self.tf_weights, [[[19]]])
+            #self.weights_diff = tf.subtract(self.w_t_1, self.all_act_prob, name='subbssss')
             mu = 1 #0.002*tf.reduce_sum(tf.abs(self.weights_diff))
             self.loss = tf.losses.compute_weighted_loss(mu*self.all_act_prob, -self.tf_vt)
 
@@ -123,13 +127,13 @@ class PolicyGradient:
     def learn(self):
         if len(self.ep_prices) != 50: return
 
-        future_prices = np.array(self.ep_fp).reshape((50,self.n_actions,1,1))
+        future_prices = np.array(self.ep_fp).reshape((50,self.n_actions+1,1,1))
         weights = np.array(self.ep_last_weights).reshape(50,self.n_actions,1,20)
         old_and_current_prices = np.vstack(self.ep_prices)
 
 # train on episode
         for i in range (0, 100):
-            _ , cost, weights_diff = self.sess.run((self.train_op, self.loss, self.weights_diff), feed_dict={
+            _ , cost = self.sess.run((self.train_op, self.loss), feed_dict={
                  self.tf_obs: old_and_current_prices,
                  self.tf_weights: weights,
                  self.tf_vt: future_prices
