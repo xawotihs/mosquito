@@ -8,6 +8,34 @@ from pathlib import Path
 tf.logging.set_verbosity(tf.logging.INFO)
 
 
+c = 0.0025
+delta = 0.0000000000000001
+
+def compute_mu(new_w, old_w):
+    mu0 = c * np.sum(np.abs(np.subtract(old_w[1:], new_w[1:])))
+    k = 0
+    while True:
+        sub = np.subtract(old_w[1:], mu0*new_w[1:])
+        mu1 = (1/(1-c*new_w[0]))*(1-(c*old_w[0]) - (2*c-c*c)*np.sum(np.maximum(sub, 0, sub)))
+        if(abs(mu0-mu1)>delta):
+            mu0=mu1
+            k = k+1
+        else:
+            break
+    return mu1, k
+
+
+def compute_mu_array(new_w, old_w):
+    mu_array = np.array([])
+    for r in range(new_w.shape[0]):
+        (mu, k) = compute_mu(new_w[r,], old_w[r,])
+        print("r:", r, " mu:", mu)
+        mu_array = np.append(mu_array, mu)
+    
+    print("array-in:", mu_array)
+    return mu_array
+
+
 class PolicyGradient:
     def __init__(
             self,
@@ -99,13 +127,15 @@ class PolicyGradient:
             # or in this way:
             #loss = tf.reduce_sum(-tf.log(neg_log_prob)*self.tf_vt, axis=1)
             #loss = tf.reduce_sum(neg_log_prob * self.tf_vt)  # reward guided loss
-            #self.last_weights = tf.gather_nd(self.tf_vt, [[[19]]])
-#            last_weights = tf.gather_nd(last_weights, [49])
+            self.last_weights = tf.gather_nd(self.tf_weights, [[[19]]])
+            #last_weights = tf.gather_nd(last_weights, [49])
 
             #self.w_t_1 = tf.gather_nd(self.tf_weights, [[[19]]])
             #self.weights_diff = tf.subtract(self.w_t_1, self.all_act_prob, name='subbssss')
-            mu = 1 #0.002*tf.reduce_sum(tf.abs(self.weights_diff))
-            self.loss = tf.losses.compute_weighted_loss(mu*self.all_act_prob, -self.tf_vt)
+            mu_array = tf.py_func(compute_mu_array, [self.all_act_prob, self.last_weights], tf.float32)
+            losses = tf.multiply(self.all_act_prob, mu_array)
+            #mu = 1 #0.002*tf.reduce_sum(tf.abs(self.weights_diff))
+            self.loss = tf.losses.compute_weighted_loss(losses, -self.tf_vt)
 
         with tf.name_scope('train'):
             self.train_op = tf.train.AdamOptimizer(self.lr).minimize(self.loss)
@@ -133,10 +163,11 @@ class PolicyGradient:
 
 # train on episode
         for i in range (0, 100):
+            randoms = np.random.randint(0, 25, 100)
             _ , cost = self.sess.run((self.train_op, self.loss), feed_dict={
-                 self.tf_obs: old_and_current_prices,
-                 self.tf_weights: weights,
-                 self.tf_vt: future_prices
+                 self.tf_obs: old_and_current_prices[randoms[i]:, :, :, :],
+                 self.tf_weights: weights[randoms[i]:, :, :, :],
+                 self.tf_vt: future_prices[randoms[i]:, :]
             })
             print("Cost[", i,"]:", cost)
 
