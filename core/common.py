@@ -11,7 +11,7 @@ def load_module(module_prefix, module_name):
         print(colored('Not provided module,. please add it as an argument or in config file', 'red'))
         sys.exit()
     mod = import_module(module_prefix + module_name)
-    module_class = getattr(mod, module_name.capitalize())
+    module_class = getattr(mod, module_name.split('.')[-1].capitalize())
     return module_class
 
 
@@ -21,7 +21,7 @@ def handle_buffer_limits(df, max_size):
     """
     df_size = len(df.index)
     if df_size > max_size:
-        # print(colored('Max memory exceeded, cleaning', 'yellow'))
+        # print(colored('Max buffer memory exceeded, cleaning', 'yellow'))
         rows_to_delete = df_size - max_size
         df = df.ix[rows_to_delete:]
         df = df.reset_index(drop=True)

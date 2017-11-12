@@ -11,6 +11,7 @@ from dateutil.tz import *
 from dateutil.parser import *
 from core.bots.enums import BuySellMode
 import configargparse
+from socket import gaierror
 
 
 class BittrexClient(Base):
@@ -64,7 +65,15 @@ class BittrexClient(Base):
         Returns candlestick chart data
         """
         currency_pair = currency_pair.replace('_', self.pair_delimiter)
-        res = self.bittrex.get_ticks(currency_pair, 'fiveMin')
+        try:
+            res = self.bittrex.get_ticks(currency_pair, 'fiveMin')
+        except gaierror as e:
+            print(colored('\n! Got gaierror exception from Bittrex client. Details: ' + e, 'red'))
+            return dict()
+        except Exception as e:
+            print(colored('\n! Got exception from Bittrex client. Details: ' + e, 'red'))
+            return dict()
+
         if res is None:
             print(colored('\n! Got empty result for pair: ' + currency_pair, 'red'))
             return dict()
@@ -108,7 +117,7 @@ class BittrexClient(Base):
         out_tickers = []
         for ticker_epoch in range(epoch_start, epoch_end, interval_in_sec):
             items = [element for element in raw_tickers if element['date'] <= ticker_epoch]
-            if len(items) < 0:
+            if len(items) <= 0:
                 print(colored('Could not found a ticker for:' + currency_pair + ', epoch:' + str(ticker_epoch), 'red'))
                 continue
             # Get the last item (should be closest to search epoch)

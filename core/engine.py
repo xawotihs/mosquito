@@ -1,4 +1,3 @@
-import sys
 import configargparse
 import core.common as common
 import pandas as pd
@@ -20,9 +19,9 @@ class Engine:
     arg_parser = configargparse.get_argument_parser()
     arg_parser.add("--strategy", help="Name of strategy to be run (if not set, the default one will be used")
     arg_parser.add("--plot", help="Generate a candle stick plot at simulation end", action='store_true')
-    arg_parser.add("--interval", help="Simulation interval", default=5)
+    arg_parser.add("--ticker_size", help="Simulation ticker size", default=5)
     arg_parser.add("--root_report_currency", help="Root currency used in final plot")
-    arg_parser.add("--buffer_size", help="Buffer size", default=24)
+    arg_parser.add("--buffer_size", help="Buffer size in days", default=30)
     arg_parser.add("--prefetch", help="Prefetch data from history DB",  action='store_true')
     arg_parser.add("--plot_pair", help="Plot pair")
     arg_parser.add("--all", help="Include all currencies/tickers")
@@ -71,7 +70,7 @@ class Engine:
         self.strategy = strategy_class()
         self.pairs = self.bot.get_pairs()
         self.look_back = pd.DataFrame()
-        self.max_lookback_size = int(self.buffer_size*(60/self.interval)*len(self.pairs))
+        self.max_lookback_size = int(self.buffer_size*(1440/self.interval)*len(self.pairs))
         self.initialize()
 
     def initialize(self):
@@ -92,7 +91,7 @@ class Engine:
         self.prefetch = self.args.prefetch
         if self.buffer_size != '':
             self.buffer_size = int(self.buffer_size)
-        self.interval = self.args.interval
+        self.interval = self.args.ticker_size
         if self.interval != '':
             self.interval = int(self.interval)
         self.config_strategy_name = self.args.strategy
@@ -104,8 +103,8 @@ class Engine:
         Last function called when the simulation is finished
         """
         print('shutting down and writing final statistics!')
-        strategy_info = self.report.write_final_stats(self.first_ticker,
-                                                      self.last_valid_ticker,
+        strategy_info = self.report.write_final_stats(self.first_ticker.copy(),
+                                                      self.last_valid_ticker.copy(),
                                                       self.wallet, self.trades)
         if self.args.plot:
             plot_title = ['Simulation: ' + str(self.trade_mode) + ' Strategy: ' + self.config_strategy_name + ', Pair: '
@@ -131,13 +130,37 @@ class Engine:
             return False
         return True
 
+    def simulation_finished(self, new_ticker):
+        """
+        Checks if simulation is finished based on new data
+        """
+        # If we got an empty dataset finish simulation
+        if new_ticker.empty:
+            print('New ticker is empty,..')
+            return True
+
+        # If we have not data just continue
+        if self.ticker is None:
+            return False
+
+        # If we have received the same date,..we assume that we have no more data,..finish simulation
+        if not self.ticker.empty and (self.ticker is not None and new_ticker.equals(self.ticker)):
+            print(colored('Received ticker data are the same as previous data (this can happen,..but not too often): '
+                          + str(new_ticker.date[0]), 'yellow'))
+            if self.trade_mode == TradeMode.backtest:
+                return True
+            else:
+                return False
+
+        return False
+
     def run(self):
         """
         This is the main simulation loop
         """
         if self.bot is None:
             print(colored('The bots type is NOT specified. You need to choose one action (--sim, --paper, --trade)', 'red'))
-            sys.exit()
+            exit(0)
 
         print(colored('Starting simulation: ' + str(self.trade_mode) + ', Strategy: ' + self.config_strategy_name, 'yellow'))
 
@@ -149,10 +172,13 @@ class Engine:
         try:
             while True:
                 # Get next ticker
-                self.ticker = self.bot.get_next(self.interval)
-                if self.ticker.empty:
+                new_ticker = self.bot.get_next(self.interval)
+                # print('new_ticker____:', new_ticker)
+                if self.simulation_finished(new_ticker):
                     print("No more data,..simulation done,. quitting")
                     exit(0)
+
+                self.ticker = new_ticker
 
                 # Check if ticker is valid
                 if not self.validate_ticker(self.ticker):
@@ -166,9 +192,9 @@ class Engine:
                 # Check if buffer is not overflown
                 self.look_back = common.handle_buffer_limits(self.look_back, self.max_lookback_size)
 
-                if self.first_ticker is None:
-                    self.first_ticker = self.ticker
-                self.last_valid_ticker = self.ticker
+                if self.first_ticker is None or self.first_ticker.empty:
+                    self.first_ticker = self.ticker.copy()
+                self.last_valid_ticker = self.ticker.copy()
 
                 # Get next actions
                 self.actions = self.strategy.calculate(self.look_back, self.wallet)
