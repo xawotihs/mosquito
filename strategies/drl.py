@@ -1,4 +1,5 @@
 import re
+import configargparse
 from .base import Base
 import core.common as common
 from .enums import TradeState
@@ -14,6 +15,7 @@ class Drl(Base):
     """
     About: Multi-currency strategy focusing on using deep reinforcement learning algorithms
     """
+    arg_parser = configargparse.get_argument_parser()
     last_computed_weights = []
     last_prices = None
     last_20_measured_weights = []
@@ -22,11 +24,13 @@ class Drl(Base):
 
 
     def __init__(self):
+        args = self.arg_parser.parse_known_args()[0]
         super(Drl, self).__init__()
         self.name = 'drl'
         self.min_history_ticks = 50
         self.buy_sell_mode = BuySellMode.user_defined
         self.DRL = None
+        self.commission = float(args.polo_txn_fee)/100
 
     def compute_relevant_pairs(self, wallet, main_currency):
         currencies = list(wallet.current_balance.keys())
@@ -97,9 +101,10 @@ class Drl(Base):
             self.step +=1
             future_prices = self.compute_future_prices(look_back)
             self.DRL.store_transition(
-                self.last_prices,
-                np.array(self.last_20_measured_weights).reshape((pairs_count,1,20)),
-                future_prices)
+                 self.last_prices,
+                 np.array(self.last_20_measured_weights).reshape((pairs_count,1,20)),
+                 future_prices,
+                 np.array(current_weights).reshape((pairs_count+1,1,1)))
 
         if(len(self.last_20_measured_weights)>=20):
             self.last_20_measured_weights.pop()
@@ -116,7 +121,7 @@ class Drl(Base):
 
         current_amounts = list(wallet.current_balance.values())
 
-        self.DRL.learn()
+        #self.DRL.learn()
 
         currencies = list(wallet.current_balance.keys())
 #        converted_look_back = look_back.pivot(index=['date', 'pair'], columns='pair', values='close')
@@ -141,9 +146,13 @@ class Drl(Base):
 #        next_weights = self.DRL.choose_weights(converted_look_back)
         next_weights = self.DRL.choose_weights(features, self.last_20_measured_weights)
         print("New weights:", next_weights)
+#        assert( (next_weights[0] != next_weights[1]) and (next_weights[1] != next_weights[2]) )
 
         self.last_computed_weights = next_weights[np.newaxis, :]
         self.last_prices = features
+
+        # let's estimate mu
+        mu, _ = self.DRL.compute_mu(next_weights, current_weights, self.commission)
 
         # We sell first, then we buy
         # if new_weight < current_weight, we need to sell the related currency
@@ -154,7 +163,7 @@ class Drl(Base):
                 close_pair_price = self.get_price(TradeState.sell, look_back, 'BTC_'+currencies[i])
                 action = TradeAction('BTC_'+currencies[i],
                                      TradeState.sell,
-                                     amount=current_amounts[i] * (current_weights[i]-next_weights[i])/current_weights[i],
+                                     amount=current_amounts[i] * (current_weights[i]-next_weights[i])/(current_weights[i]*mu),
                                      rate=close_pair_price,
                                      buy_sell_mode=self.buy_sell_mode)
                 self.actions.append(action)
@@ -168,10 +177,9 @@ class Drl(Base):
                 action = TradeAction('BTC_'+currencies[i],
                                      TradeState.buy,
                                      # let's only buy 99% of what the algo recommands to avoid going negative with the fees
-                                     amount= 0.99*(wallet_value/close_pair_price) * (next_weights[i]-current_weights[i]),
+                                     amount= mu*(wallet_value/close_pair_price) * (next_weights[i]-current_weights[i]),
                                      rate=close_pair_price,
                                      buy_sell_mode=self.buy_sell_mode)
                 self.actions.append(action)
 
         return self.actions
-
