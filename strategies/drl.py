@@ -100,9 +100,11 @@ class Drl(Base):
         if self.last_computed_weights!=[]:
             self.step +=1
             future_prices = self.compute_future_prices(look_back)
+            weights = np.array(self.last_20_measured_weights).transpose((1,2,0))
             self.DRL.store_transition(
                  self.last_prices,
-                 np.array(self.last_20_measured_weights).reshape((pairs_count,1,20)),
+                 weights,
+                 #np.array(self.last_20_measured_weights).reshape((pairs_count,1,20)),
                  future_prices,
                  np.array(current_weights).reshape((pairs_count+1,1,1)))
 
@@ -121,7 +123,7 @@ class Drl(Base):
 
         current_amounts = list(wallet.current_balance.values())
 
-        #self.DRL.learn()
+        self.DRL.learn()
 
         currencies = list(wallet.current_balance.keys())
 #        converted_look_back = look_back.pivot(index=['date', 'pair'], columns='pair', values='close')
@@ -138,7 +140,7 @@ class Drl(Base):
 
         features = np.array([close.as_matrix(), high.as_matrix(), low.as_matrix()])
         features = features[np.newaxis, :]
-        assert(features.shape == (1,3,pairs_count,50))
+#        assert(features.shape == (1,3,pairs_count,50))
 
 #        converted_look_back = converted_look_back.filter(items = self.compute_relevant_pairs(wallet, 'BTC'))
 #        converted_look_back = converted_look_back.tail(self.min_history_ticks)

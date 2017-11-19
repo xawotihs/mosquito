@@ -2,6 +2,7 @@ import numpy as np
 import tensorflow as tf
 from pathlib import Path
 from core.tradeaction import TradeAction
+import glob, os
 
 # reproducible
 #np.random.seed(1)
@@ -42,12 +43,18 @@ class PolicyGradient:
             # tf.train.SummaryWriter soon be deprecated, use following
             tf.summary.FileWriter("logs/", self.sess.graph)
 
+        self.sess.run(tf.global_variables_initializer())
+
         my_file = Path("logs")
         if my_file.exists():
-            # Restore variables from disk.
-            self.saver.restore(self.sess, "logs/model.ckpt")
+            for file in glob.glob("logs/*model.ckpt*"):
+                # Restore variables from disk.
+                self.saver.restore(self.sess, "logs/model.ckpt")
+                break
 
-        self.sess.run(tf.global_variables_initializer())
+        vars = tf.trainable_variables()
+        for var in vars:
+            print(var, ", value:", var.eval(self.sess))
 
     def compute_mu(self, new_w, old_w, cur = c):
         mu0 = cur * np.sum(np.abs(np.subtract(old_w[1:], new_w[1:])))
@@ -143,8 +150,9 @@ class PolicyGradient:
         padded = tf.pad(self.conv3, tf.constant([[0,0], [1,0], [0,0], [0,0]]), "CONSTANT")
         #self.all_act = tf.concat([self.conv3, cash_bias],1)
 
-        padded = tf.Print(padded, [padded], "padded:", summarize=12000)
+        padded = tf.Print(padded, [padded+cash_bias, cash_bias], "padded:", summarize=12000)
         self.all_act_prob = tf.nn.softmax(padded+cash_bias, dim=1, name='computed_weights')  # use softmax to convert to probability
+        self.all_act_prob = tf.Print(self.all_act_prob, [self.all_act_prob], "self.all_act_prob:", summarize=12000)
 
         with tf.name_scope('loss'):
             # to maximize total reward (log_p * R) is to minimize -(log_p * R), and the tf only have minimize(loss)
@@ -158,11 +166,28 @@ class PolicyGradient:
 
             #self.w_t_1 = tf.gather_nd(self.tf_weights, [[[19]]])
             #self.weights_diff = tf.subtract(self.w_t_1, self.all_act_prob, name='subbssss')
-            mu_array = tf.py_func(self.compute_mu_array, [self.all_act_prob, self.tf_cp], tf.float64)
+            last_weights = self.tf_weights[:, :, :, 0]
+            last_weights = tf.reshape(last_weights, [50, 5])
+            last_weights_main = 1- tf.reduce_sum(last_weights, 1)
+            last_weights_main = tf.reshape(last_weights_main, [50, 1])
+            last_weights = tf.concat([last_weights_main, last_weights], 1)
+            mu_array = tf.py_func(self.compute_mu_array, [self.all_act_prob, last_weights], tf.float64)
             mu_array = tf.cast(mu_array, tf.float32)  # [1, 2], dtype=tf.int32
-            losses = tf.multiply(self.all_act_prob, mu_array)
+            #mu_array = tf.Print(mu_array, [mu_array], "mu_array:", summarize=12000)
+
+            last_prices = self.prices[-1, :, :, 0]
+            #last_prices = tf.pad(last_prices, tf.constant([[1,0], [0,0]]), "CONSTANT")
+            last_prices = tf.concat([tf.ones([1, 50]), last_prices], 0)
+            last_prices = tf.transpose(last_prices, [1, 0])
+            last_prices = tf.multiply(last_prices, tf.reshape(mu_array, [50,1]))
+            last_prices = tf.Print(last_prices, [last_prices], "last_prices:", summarize=12000)
+
+            losses2 = tf.multiply(last_prices, tf.reshape(self.all_act_prob,[50,6]))
+            losses = tf.Print(losses2, [losses2], "losses2:", summarize=12000)
+
             #mu = 1 #0.002*tf.reduce_sum(tf.abs(self.weights_diff))
-            self.loss = tf.losses.compute_weighted_loss(losses, -self.tf_vt)
+            self.loss = -tf.reduce_sum(tf.log(losses))
+            self.loss = tf.Print(self.loss, [self.loss], "self.loss:", summarize=12000)
 
         with tf.name_scope('train'):
             self.train_op = tf.train.AdamOptimizer(self.lr).minimize(self.loss)
@@ -187,13 +212,14 @@ class PolicyGradient:
         if m == 0 or m%100 != 0: return
 
         future_prices = np.array(self.ep_fp).reshape((m,self.n_actions+1,1,1))
-        weights = np.array(self.ep_last_weights).reshape(m,self.n_actions,1,20)
+        weights = np.array(self.ep_last_weights)
+        weights = weights.reshape(m,self.n_actions,1,20)
         old_and_current_prices = np.vstack(self.ep_prices)
         current_prices = np.array(self.ep_cp).reshape((m,self.n_actions+1,1,1))
 
 # train on episode
-        randoms = np.random.randint(0, m-50, 100)
-        for i in range (0, 100):
+        randoms = np.random.randint(m-100, m-50, 10000)
+        for i in range (0, 10000):
             _ , cost = self.sess.run((self.train_op, self.loss), feed_dict={
                 self.tf_obs: old_and_current_prices[randoms[i]:randoms[i]+50, :, :, :],
                 self.tf_weights: weights[randoms[i]:randoms[i]+50, :, :, :],
