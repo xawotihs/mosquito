@@ -80,6 +80,7 @@ class PolicyGradient:
     def _build_net(self):
         with tf.name_scope('inputs'):
             self.tf_obs = tf.placeholder(tf.float32, [None, self.n_features, self.n_actions, 50], name="observations")
+            batch_size = tf.shape(self.tf_obs)[0]
             #From NCHW to NHWC
             #x = tf.reshape(self.tf_obs, [1, 2, 3, 4])  # input
             #x = tf.reshape(self.tf_obs, [-1, self.n_features, self.n_actions, 50])  # input
@@ -93,36 +94,20 @@ class PolicyGradient:
         # CONV2D: stride of 1
         W1 = tf.get_variable("W1", [1, 3, 3, 2], initializer=tf.contrib.layers.xavier_initializer(seed=0))
         Z1 = tf.nn.conv2d(self.prices, W1, strides=[1, 1, 1, 1], padding='VALID')
+        b1 = tf.Variable(initial_value=tf.zeros(shape=(2,)))
+        Z1_b1 = tf.nn.bias_add(Z1, b1)
         # RELU
-        self.conv1 = tf.nn.relu(Z1)
+        self.conv1 = tf.nn.relu(Z1_b1)
 
-#         self.conv1 = tf.layers.conv2d(
-#             inputs=self.prices,
-#             filters=2,
-#             kernel_size=[1, 3],
-#             activation=tf.nn.relu,
-# #            kernel_initializer=tf.contrib.layers.xavier_initializer(),
-# #            bias_initializer=tf.contrib.layers.xavier_initializer(),
-# #            kernel_regularizer=tf.contrib.layers.l2_regularizer(scale=0.00000001),
-#             name='conv1',
-#         )
         self.conv1 = tf.Print(self.conv1, [self.conv1], "self.conv1:", summarize=100)
         W2 = tf.get_variable("W2", [1, 48, 2, 1],
                              initializer=tf.contrib.layers.xavier_initializer(seed=0))
         Z2 = tf.nn.conv2d(self.conv1, W2, strides=[1, 1, 1, 1], padding='VALID')
+        b2 = tf.Variable(initial_value=tf.zeros(shape=(1,)))
+        Z2_b2 = tf.nn.bias_add(Z2, b2)
         # RELU
-        self.conv2 = tf.nn.relu(Z2)
+        self.conv2 = tf.nn.relu(Z2_b2)
 
-        #         self.conv2 = tf.layers.conv2d(
-#             inputs=self.conv1,
-#             filters=1,
-#             kernel_size=[1, 48],
-#             activation=tf.nn.relu,
-# #            kernel_initializer = tf.contrib.layers.xavier_initializer(),
-# #            bias_initializer=tf.contrib.layers.xavier_initializer(),
-# #            kernel_regularizer=tf.contrib.layers.l2_regularizer(scale=0.00000001),
-#             name='conv2',
-#         )
         self.conv2 = tf.Print(self.conv2, [self.conv2], "self.conv2:", summarize=100)
         concat = tf.concat([self.conv2, self.tf_weights],3)
         concat = tf.Print(concat, [concat], "concat:", summarize=100)
@@ -130,20 +115,12 @@ class PolicyGradient:
         W3 = tf.get_variable("W3", [1, 1, 21, 1],
                              initializer=tf.contrib.layers.xavier_initializer(seed=0))
         Z3 = tf.nn.conv2d(concat, W3, strides=[1, 1, 1, 1], padding='VALID')
+        b3 = tf.Variable(initial_value=tf.zeros(shape=(1,)))
+        Z3_b3 = tf.nn.bias_add(Z3, b3)
         # RELU
-        self.conv3 = Z3 #tf.nn.relu(Z3)
+        self.conv3 = Z3_b3 #tf.nn.relu(Z3)
 
 
-#         self.conv3 = tf.layers.conv2d(
-#             inputs=concat,
-#             filters=1,
-#             kernel_size=[1, 1],
-#             activation=tf.nn.relu,
-# #            kernel_initializer = tf.contrib.layers.xavier_initializer(),
-# #            bias_initializer=tf.contrib.layers.xavier_initializer(),
-# #            kernel_regularizer=tf.contrib.layers.l2_regularizer(scale=0.00000001),
-#             name='conv3'
-#         )
         self.conv3 = tf.Print(self.conv3, [self.conv3], "self.conv3:", summarize=100)
 
         cash_bias = tf.get_variable("cash_bias", [1], initializer=tf.contrib.layers.xavier_initializer())
@@ -167,22 +144,22 @@ class PolicyGradient:
             #self.w_t_1 = tf.gather_nd(self.tf_weights, [[[19]]])
             #self.weights_diff = tf.subtract(self.w_t_1, self.all_act_prob, name='subbssss')
             last_weights = self.tf_weights[:, :, :, 0]
-            last_weights = tf.reshape(last_weights, [50, 5])
+            last_weights = tf.reshape(last_weights, [batch_size, self.n_actions])
             last_weights_main = 1- tf.reduce_sum(last_weights, 1)
-            last_weights_main = tf.reshape(last_weights_main, [50, 1])
-            last_weights = tf.concat([last_weights_main, last_weights], 1)
-            mu_array = tf.py_func(self.compute_mu_array, [self.all_act_prob, last_weights], tf.float64)
-            mu_array = tf.cast(mu_array, tf.float32)  # [1, 2], dtype=tf.int32
+            last_weights_main = tf.reshape(last_weights_main, [batch_size, 1])
+            self.last_weights = tf.concat([last_weights_main, last_weights], 1)
+            self.mu_array = tf.py_func(self.compute_mu_array, [self.all_act_prob, self.last_weights], tf.float64)
+            self.mu_array = tf.cast(self.mu_array, tf.float32)  # [1, 2], dtype=tf.int32
             #mu_array = tf.Print(mu_array, [mu_array], "mu_array:", summarize=12000)
 
-            last_prices = self.prices[-1, :, :, 0]
+            last_prices = self.prices[-1, :, (50-batch_size):50, 0]
             #last_prices = tf.pad(last_prices, tf.constant([[1,0], [0,0]]), "CONSTANT")
-            last_prices = tf.concat([tf.ones([1, 50]), last_prices], 0)
+            last_prices = tf.concat([tf.ones([1, batch_size]), last_prices], 0)
             last_prices = tf.transpose(last_prices, [1, 0])
-            last_prices = tf.multiply(last_prices, tf.reshape(mu_array, [50,1]))
+            last_prices = tf.multiply(last_prices, tf.reshape(self.mu_array, [batch_size,1]))
             last_prices = tf.Print(last_prices, [last_prices], "last_prices:", summarize=12000)
 
-            losses2 = tf.multiply(last_prices, tf.reshape(self.all_act_prob,[50,6]))
+            losses2 = tf.multiply(last_prices, tf.reshape(self.all_act_prob,[batch_size,self.n_actions+1]))
             losses = tf.Print(losses2, [losses2], "losses2:", summarize=12000)
 
             #mu = 1 #0.002*tf.reduce_sum(tf.abs(self.weights_diff))
@@ -194,12 +171,15 @@ class PolicyGradient:
 
     def choose_weights(self, prices, historic_weights):
         #normalize the input
-        weights = np.array(historic_weights).reshape(1,self.n_actions,1,20)
-        prob_weights, conv2, conv1, transposed_prices = self.sess.run((self.all_act_prob, self.conv2, self.conv1, self.prices),
+        weights = np.array(historic_weights)
+        weights = np.transpose(weights, [1, 2, 0])
+        weights = weights.reshape(1,self.n_actions,1,20)
+        prob_weights, loss, mu_nn, last_weights = self.sess.run((self.all_act_prob, self.loss, self.mu_array, self.last_weights),
                                               feed_dict={self.tf_obs: prices, self.tf_weights: weights})
-                                                                       #observation.values.flatten().tolist()})
-                                                                       #observation[np.newaxis, :]})
-        return prob_weights.flatten()
+
+        flat = prob_weights.flatten()
+        mu, _ = self.compute_mu(flat, [4.80278324e-01, 9.00729626e-02, 9.71699105e-02, 5.45146636e-03, 2.90568386e-02, 1.34689253e-04, 1.95781107e-01, 2.44711412e-04, 8.98468091e-02, 1.10886659e-03, 1.08543141e-02])
+        return flat
 
     def store_transition(self, s, l, f, c):
         self.ep_prices.append(s)
@@ -218,8 +198,8 @@ class PolicyGradient:
         current_prices = np.array(self.ep_cp).reshape((m,self.n_actions+1,1,1))
 
 # train on episode
-        randoms = np.random.randint(m-100, m-50, 10000)
-        for i in range (0, 10000):
+        randoms = np.random.randint(m-100, m-50, 1000)
+        for i in range (0, len(randoms)):
             _ , cost = self.sess.run((self.train_op, self.loss), feed_dict={
                 self.tf_obs: old_and_current_prices[randoms[i]:randoms[i]+50, :, :, :],
                 self.tf_weights: weights[randoms[i]:randoms[i]+50, :, :, :],
