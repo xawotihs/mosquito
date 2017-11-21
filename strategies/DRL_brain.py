@@ -148,7 +148,8 @@ class PolicyGradient:
             last_weights_main = 1- tf.reduce_sum(last_weights, 1)
             last_weights_main = tf.reshape(last_weights_main, [batch_size, 1])
             self.last_weights = tf.concat([last_weights_main, last_weights], 1)
-            self.mu_array = tf.py_func(self.compute_mu_array, [self.all_act_prob, self.last_weights], tf.float64)
+            next_weights = tf.reshape(self.all_act_prob, [batch_size, self.n_actions+1])
+            self.mu_array = tf.py_func(self.compute_mu_array, [next_weights, self.last_weights], tf.float64)
             self.mu_array = tf.cast(self.mu_array, tf.float32)  # [1, 2], dtype=tf.int32
             #mu_array = tf.Print(mu_array, [mu_array], "mu_array:", summarize=12000)
 
@@ -156,14 +157,14 @@ class PolicyGradient:
             #last_prices = tf.pad(last_prices, tf.constant([[1,0], [0,0]]), "CONSTANT")
             last_prices = tf.concat([tf.ones([1, batch_size]), last_prices], 0)
             last_prices = tf.transpose(last_prices, [1, 0])
-            last_prices = tf.multiply(last_prices, tf.reshape(self.mu_array, [batch_size,1]))
             last_prices = tf.Print(last_prices, [last_prices], "last_prices:", summarize=12000)
+            last_prices = tf.multiply(last_prices, tf.reshape(self.mu_array, [batch_size,1]))
 
             losses2 = tf.multiply(last_prices, tf.reshape(self.all_act_prob,[batch_size,self.n_actions+1]))
             losses = tf.Print(losses2, [losses2], "losses2:", summarize=12000)
 
             #mu = 1 #0.002*tf.reduce_sum(tf.abs(self.weights_diff))
-            self.loss = -tf.reduce_sum(tf.log(losses))
+            self.loss = -(tf.reduce_sum(tf.log(losses)))/tf.cast(batch_size, tf.float32)
             self.loss = tf.Print(self.loss, [self.loss], "self.loss:", summarize=12000)
 
         with tf.name_scope('train'):
@@ -178,7 +179,8 @@ class PolicyGradient:
                                               feed_dict={self.tf_obs: prices, self.tf_weights: weights})
 
         flat = prob_weights.flatten()
-        mu, _ = self.compute_mu(flat, [4.80278324e-01, 9.00729626e-02, 9.71699105e-02, 5.45146636e-03, 2.90568386e-02, 1.34689253e-04, 1.95781107e-01, 2.44711412e-04, 8.98468091e-02, 1.10886659e-03, 1.08543141e-02])
+        mu, _ = self.compute_mu(flat, [ 0.08207418, 0.55225003, 0.1332266, 0.02025595, 0.1210597, 0.09113353])
+        #mu, _ = self.compute_mu(flat, [4.80278324e-01, 9.00729626e-02, 9.71699105e-02, 5.45146636e-03, 2.90568386e-02, 1.34689253e-04, 1.95781107e-01, 2.44711412e-04, 8.98468091e-02, 1.10886659e-03, 1.08543141e-02])
         return flat
 
     def store_transition(self, s, l, f, c):
